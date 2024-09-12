@@ -1,0 +1,28 @@
+name: Check CI runs
+description: Check for a successful CI workflow run with the same tree
+
+inputs:
+  ci_workflows:
+    description: "CI workflow names (comma-delimited)"
+    required: true
+outputs:
+  ci_required:
+    description: "Whether a CI workflow run is required for the current tree (0 = no, 1 = yes)"
+    value: ${{ steps.get-ci-required.outputs.ci_required }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for a successful run with the same tree
+      id: get-ci-required
+      shell: bash
+      run: |
+        while true; do
+            "$github_action_path/check-ci-runs.sh" >>"$GITHUB_OUTPUT" && exit ||
+                { (($? == 3)) && sleep 60; } ||
+                exit
+        done
+      env:
+        github_action_path: ${{ github.action_path }}
+        ci_run_id: ${{ github.run_id }}
+        ci_workflows: ${{ inputs.ci_workflows }}

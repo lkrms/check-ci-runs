@@ -22,12 +22,12 @@ runs:
       id: get-ci-required
       shell: bash
       run: |
-        while true; do
-            "$github_action_path/check-ci-runs.sh" >>"$GITHUB_OUTPUT" && exit ||
-                { (($? == 3)) && sleep 60; } ||
-                exit
-        done
+        "$github_action_path/check-ci-runs.sh" >>"$GITHUB_OUTPUT"
       env:
         github_action_path: ${{ github.action_path }}
         ci_run_id: ${{ github.run_id }}
         ci_workflows: ${{ inputs.ci_workflows }}
+
+branding:
+  color: purple
+  icon: cloud-off

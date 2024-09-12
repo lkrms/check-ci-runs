@@ -13,6 +13,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
     - name: Check for a successful run with the same tree
       id: get-ci-required
       shell: bash

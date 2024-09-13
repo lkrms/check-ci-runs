@@ -73,9 +73,9 @@ Pattern syntax is documented under `pathspec` in the [Git Glossary][pathspec].
 
 ## License
 
-This project is licensed under the [MIT License][LICENSE].
+This project is licensed under the [MIT License][].
 
 [actions/checkout@v4]: https://github.com/actions/checkout/tree/v4/
-[LICENSE]: LICENSE
+[MIT License]: LICENSE
 [pathspec]:
   https://git-scm.com/docs/gitglossary#Documentation/gitglossary.txt-aiddefpathspecapathspec

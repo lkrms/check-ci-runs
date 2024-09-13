@@ -40,9 +40,42 @@ jobs:
     if: ${{ needs.check-ci-runs.outputs.ci_required == 1 && !cancelled() && !failure() }}
 ```
 
+### `.ci-pathspec`
+
+Changes to files that do not match a pattern in your repository's `.ci-pathspec`
+file are ignored when the action compares workflow run commits.
+
+Here's an example from a PHP project:
+
+```
+# /.ci-pathspec
+.github/workflows/**
+bin/**
+scripts/**
+src/**
+tests/**
+tools/**
+.ci-pathspec
+.gitattributes
+.php-cs-fixer.dist.php
+.prettyphp
+bootstrap.php
+box.json
+composer.json
+composer.lock
+phpstan*
+phpunit.xml.dist
+```
+
+Empty lines and lines that start with `#` are ignored.
+
+Pattern syntax is documented under `pathspec` in the [Git Glossary][pathspec].
+
 ## License
 
 This project is licensed under the [MIT License][LICENSE].
 
 [actions/checkout@v4]: https://github.com/actions/checkout/tree/v4/
 [LICENSE]: LICENSE
+[pathspec]:
+  https://git-scm.com/docs/gitglossary#Documentation/gitglossary.txt-aiddefpathspecapathspec

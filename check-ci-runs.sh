@@ -113,13 +113,13 @@ else
     if [[ $checkout == HEAD ]]; then
         checkout=$commit
     else
-        cmd git -c advice.detachedHead=false checkout "$commit" >&2
+        cmd git -c advice.detachedHead=false checkout "$commit"
     fi
-    cmd git rm -rf --quiet . >&2
-    cmd git checkout "$commit" -- "${pathspec[@]}" >&2
+    cmd git rm -rf --quiet .
+    cmd git checkout "$commit" -- "${pathspec[@]}"
     tree=$(cmd git write-tree)
-    cmd git checkout --force "$checkout" >&2
-fi
+    cmd git checkout --force "$checkout"
+fi >&2
 printf '%s\n' "$tree" >"$artifact_dir/tree"
 log "Tree object for this run: $tree"
 endgroup
@@ -150,31 +150,28 @@ done < <(
         gh run list --workflow "$workflow" --limit 100 \
             --json 'conclusion,databaseId,headSha,startedAt,workflowName' \
             --jq '.[] | [.headSha, .databaseId, .workflowName, .startedAt, .conclusion] | @tsv'
-    done
+    done | sort -k4,4r
 )
 
 ci_required=1
-if [[ ${complete+1}${pending+1} ]]; then
-    for run in ${complete+"${complete[@]}"}; do
-        read -r sha run_id workflow <<<"$run"
-        same "$sha" "$run_id" "$workflow" || continue
-        notice "'$workflow' run $run_id succeeded with same tree: $sha"
-        ci_required=0
-        break
-    done
+for run in ${complete+"${complete[@]}"}; do
+    read -r sha run_id workflow <<<"$run"
+    same "$sha" "$run_id" "$workflow" || continue
+    notice "'$workflow' run $run_id succeeded with same tree: $sha"
+    ci_required=0
+    unset pending
+    break
+done
 
-    if ((ci_required)); then
-        for run in ${pending+"${pending[@]}"}; do
-            read -r sha run_id workflow <<<"$run"
-            same "$sha" "$run_id" "$workflow" || continue
-            log "Waiting for '$workflow' run $run_id to finish"
-            cmd gh run watch --exit-status "$run_id" &>/dev/null || continue
-            notice "'$workflow' run $run_id succeeded with same tree: $sha"
-            ci_required=0
-            break
-        done
-    fi
-fi
+for run in ${pending+"${pending[@]}"}; do
+    read -r sha run_id workflow <<<"$run"
+    same "$sha" "$run_id" "$workflow" || continue
+    log "Waiting for '$workflow' run $run_id to finish"
+    cmd gh run watch --exit-status "$run_id" &>/dev/null || continue
+    notice "'$workflow' run $run_id succeeded with same tree: $sha"
+    ci_required=0
+    break
+done
 
 endgroup
 

@@ -12,20 +12,24 @@ function die() {
 # group <title>
 function group() {
     printf '::group::%s\n' "$1" >&2
+    in_group=1
 }
 
 # endgroup
 function endgroup() {
-    printf '::endgroup::\n' >&2
+    if ((in_group)); then
+        printf '::endgroup::\n' >&2
+        in_group=0
+    fi
 }
 
-# warn <message>
-function warn() {
+# warning <message>
+function warning() {
     printf '::warning::%s\n' "$1" >&2
 }
 
-# note <message>
-function note() {
+# notice <message>
+function notice() {
     printf '::notice::%s\n' "$1" >&2
 }
 
@@ -36,7 +40,13 @@ function debug() {
 
 # log <message>
 function log() {
-    printf '==> %s\n' "$1" >&2
+    printf -- '-> %s\n' "$1" >&2
+}
+
+# cmd <command> [<argument>...]
+function cmd() {
+    printf -- '->%s\n' "$(printf ' %q' "$@")" >&2
+    "$@"
 }
 
 # same <ref> <run_id> <workflow>
@@ -53,21 +63,29 @@ function same() {
         same_ref+=("$1")
         return
     else
-        log "'$3' workflow run $2 does not have the same tree: $1"
+        log "'$3' run $2 has different tree: $1"
         not_same_ref+=("$1")
         return 1
     fi
 }
 
 IFS=,
+
 workflows=(${ci_workflows-})
+
+in_group=0
+same_ref=()
+not_same_ref=()
 
 [[ ${workflows+1} ]] || die "No CI workflows specified"
 
-ci_started_at=${ci_run_id+$(gh run view --json startedAt --jq .startedAt "$ci_run_id")} ||
-    ci_started_at=
-same_ref=()
-not_same_ref=()
+ci_started_at=${ci_run_id+$(
+    gh run view --json startedAt --jq .startedAt "$ci_run_id"
+)} || ci_started_at=
+
+artifact_dir=$(mktemp -d)
+
+trap endgroup EXIT
 
 # Read non-empty lines from `.ci-pathspec` into the `pathspec` array
 group "Checking pathspec"
@@ -78,63 +96,90 @@ mapfile -t pathspec < <(
     }
 )
 [[ ${pathspec+1} ]] ||
-    note ".ci-pathspec is empty or missing, so entire tree must match"
+    notice ".ci-pathspec is empty or missing, so entire tree must match"
 endgroup
 
-while true; do
-    group "Checking workflow runs"
-    complete=()
-    pending=()
-    while IFS=$'\t' read -r sha run_id workflow started_at conclusion; do
-        # Ignore the run we belong to
-        [[ $run_id != "${ci_run_id-}" ]] || continue
-        # Ignore runs that failed
-        [[ ${conclusion:-success} == success ]] || continue
-        # Ignore runs that are still in progress and started after ours,
-        # otherwise we'll be waiting forever
-        [[ $conclusion ]] || [[ -z $ci_started_at ]] || [[ $ci_started_at > $started_at ]] || continue
-        # Ignore runs with commits not in the repo
-        git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null || continue
-        run="$sha,$run_id,$workflow"
-        if [[ $conclusion ]]; then
-            complete+=("$run")
-        else
-            pending+=("$run")
-        fi
-    done < <(
-        for workflow in "${workflows[@]}"; do
-            log "Retrieving '$workflow' workflow runs"
-            gh run list --workflow "$workflow" --limit 100 \
-                --json 'conclusion,databaseId,headSha,startedAt,workflowName' \
-                --jq '.[] | [.headSha, .databaseId, .workflowName, .startedAt, .conclusion] | @tsv'
-        done
-    )
-    endgroup
+group "Checking tree"
+if [[ ! ${pathspec+1} ]]; then
+    tree=$(git rev-parse "HEAD^{tree}")
+else
+    dirty=1
+    git status --porcelain | grep . >/dev/null ||
+        { [[ ${PIPESTATUS[*]} == 0,1 ]] && dirty=0; } || die
+    ((!dirty)) || die "Working tree is dirty"
 
-    ci_required=1
-    if [[ ${complete+1}${pending+1} ]]; then
-        group "Checking trees"
-        for run in ${complete+"${complete[@]}"}; do
-            read -r sha run_id workflow <<<"$run"
-            same "$sha" "$run_id" "$workflow" || continue
-            log "'$workflow' workflow run $run_id succeeded with the same tree: $sha"
-            ci_required=0
-            endgroup
-            break 2
-        done
+    commit=$(git rev-parse HEAD)
+    checkout=$(git rev-parse --abbrev-ref HEAD)
+    if [[ $checkout == HEAD ]]; then
+        checkout=$commit
+    else
+        cmd git -c advice.detachedHead=false checkout "$commit" >&2
+    fi
+    cmd git rm -rf --quiet . >&2
+    cmd git checkout "$commit" -- "${pathspec[@]}" >&2
+    tree=$(cmd git write-tree)
+    cmd git checkout --force "$checkout" >&2
+fi
+printf '%s\n' "$tree" >"$artifact_dir/tree"
+log "Tree object for this run: $tree"
+endgroup
 
+group "Checking workflow runs"
+
+complete=()
+pending=()
+while IFS=$'\t' read -r sha run_id workflow started_at conclusion; do
+    # Ignore the run we belong to
+    [[ $run_id != "${ci_run_id-}" ]] || continue
+    # Ignore runs that failed
+    [[ ${conclusion:-success} == success ]] || continue
+    # Ignore runs that are still in progress and started after ours,
+    # otherwise we'll be waiting forever
+    [[ $conclusion ]] || [[ ! $ci_started_at ]] || [[ $ci_started_at > $started_at ]] || continue
+    # Ignore runs with commits not in the repo
+    git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null || continue
+    run="$sha,$run_id,$workflow"
+    if [[ $conclusion ]]; then
+        complete+=("$run")
+    else
+        pending+=("$run")
+    fi
+done < <(
+    for workflow in "${workflows[@]}"; do
+        log "Retrieving '$workflow' runs"
+        gh run list --workflow "$workflow" --limit 100 \
+            --json 'conclusion,databaseId,headSha,startedAt,workflowName' \
+            --jq '.[] | [.headSha, .databaseId, .workflowName, .startedAt, .conclusion] | @tsv'
+    done
+)
+
+ci_required=1
+if [[ ${complete+1}${pending+1} ]]; then
+    for run in ${complete+"${complete[@]}"}; do
+        read -r sha run_id workflow <<<"$run"
+        same "$sha" "$run_id" "$workflow" || continue
+        notice "'$workflow' run $run_id succeeded with same tree: $sha"
+        ci_required=0
+        break
+    done
+
+    if ((ci_required)); then
         for run in ${pending+"${pending[@]}"}; do
             read -r sha run_id workflow <<<"$run"
             same "$sha" "$run_id" "$workflow" || continue
-            note "Waiting for '$workflow' workflow run $run_id to finish with the same tree: $sha"
-            sleep 60
-            endgroup
-            continue 2
+            log "Waiting for '$workflow' run $run_id to finish"
+            cmd gh run watch --exit-status "$run_id" &>/dev/null || continue
+            notice "'$workflow' run $run_id succeeded with same tree: $sha"
+            ci_required=0
+            break
         done
-        endgroup
     fi
-    break
-done
+fi
+
+endgroup
 
 ((!ci_required)) || log 'No successful workflow runs found with the same tree'
-printf 'ci_required=%d\n' "$ci_required"
+
+printf '%s=%s\n' \
+    artifact_dir "$artifact_dir" \
+    ci_required "$ci_required"

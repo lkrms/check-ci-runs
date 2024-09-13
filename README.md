@@ -3,17 +3,16 @@
 > Skip your CI workflow if an identical run already succeeded with a different
 > commit/tag/branch.
 
-This GitHub Action uses [actions/checkout@v4][] to check out your repository
-with `fetch-depth: 0` and looks for a successful CI workflow run with the same
-tree.
+This GitHub Action uses [actions/checkout@v4][] to check out your repository if
+necessary and looks for a successful CI workflow run with the same tree.
 
 If it finds an `in_progress` run with the same tree that was triggered before
 the run that called the action, it waits for it to finish before returning a
 result.
 
 If there are non-empty lines in a `.ci-pathspec` file at the root of your
-repository, they are passed to `git diff-tree` to limit files that must be the
-same in both commits.
+repository, they are passed to `git` to limit files that must be the same in
+both commits.
 
 ## Usage
 

@@ -14,6 +14,7 @@ runs:
   using: composite
   steps:
     - name: Checkout
+      if: ${{ hashFiles('.git/config') == '' }}
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
@@ -27,6 +28,12 @@ runs:
         github_action_path: ${{ github.action_path }}
         ci_run_id: ${{ github.run_id }}
         ci_workflows: ${{ inputs.ci_workflows }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: check-ci-runs-metadata
+        path: ${{ steps.get-ci-required.outputs.artifact_dir }}
 
 branding:
   color: purple
